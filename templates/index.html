@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Matrix</title>
+    <style>
+        #matrix {
+            display: grid;
+            grid-template-columns: repeat(16, 20px);
+            grid-template-rows: repeat(16, 20px);
+            gap: 1px;
+            margin-top: 20px;
+        }
+        .cell {
+            border: 1px solid black;
+            cursor: pointer;
+            background-color: white;
+        }
+        .active {
+            background-color: yellow;
+        }
+        .current {
+            background-color: lightblue;
+        }
+        .settings {
+            margin-bottom: 20px;
+        }
+        .controls {
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="settings">
+        <label for="bpm">BPM:</label>
+        <input type="number" id="bpm" value="120"> <br>
+        <button id="applySettings">Enter</button>
+    </div>
+    <div class="controls">
+        <button id="start">Play audio</button>
+        <button id="reset">Clear</button>
+    </div>
+    <div id="matrix"></div>
+
+        <script src="https://cdn.jsdelivr.net/npm/tone/build/Tone.js"></script>
+    <script>
+        const noteFrequencies = [
+            73.41625, 82.40625, 92.49875, 110.00,
+            123.47125, 146.8325, 164.81375, 184.9975,
+            220.00, 246.94125, 261.625, 329.6275,
+            349.22875, 391.995, 440.00, 493.88375,
+            523.25125
+        ];
+
+        const matrixElement = document.getElementById('matrix');
+        let isPlaying = false;
+        let intervalTime = 500;
+        let bpmValue = 120;
+        let isMouseDown = false;
+        let currentColumn = 0;
+        let loop;
+
+const bpmInput = document.getElementById('bpm');
+const applySettingsButton = document.getElementById('applySettings');
+
+        // Аудио настройки
+const masterChannel = new Tone.Channel({ volume: -12 }).toDestination();
+
+const limiter = new Tone.Limiter(-3).connect(masterChannel);
+const compressor = new Tone.Compressor({
+    threshold: -24,
+    ratio: 3,
+    attack: 0.005,
+    release: 0.1
+}).connect(limiter);
+
+const reverb = new Tone.Reverb({ 
+    decay: 5,
+    wet: 0.2
+}).connect(compressor);
+
+const delay = new Tone.FeedbackDelay({
+    delayTime: 0.5,
+    feedback: 0.3,
+    wet: 0.2
+}).connect(reverb);
+
+const bellSynth = new Tone.PolySynth(Tone.FMSynth, {
+    harmonicity: 2,
+    modulationIndex: 4,
+    oscillator: { type: "sine" },
+    envelope: { 
+        attack: 0.01, 
+        decay: 0.2,
+        sustain: 0.05,
+        release: 1.5
+    },
+    modulation: { type: "sine" },
+    modulationEnvelope: { 
+        attack: 0.05, 
+        decay: 0.2,
+        sustain: 0.003,
+        release: 1.5
+    }
+}, {
+    maxPolyphony: 64 // Увеличиваем максимальную полифонию
+}).connect(new Tone.Gain(0.0005)).connect(delay);
+
+const harmonicsSynth = new Tone.PolySynth(Tone.Synth, {
+    oscillator: { type: "sine" },
+    envelope: { 
+        attack: 0.02, 
+        decay: 0.5,
+        sustain: 0.008,
+        release: 2
+    }
+}, {
+    maxPolyphony: 64 // Увеличиваем максимальную полифонию
+}).connect(new Tone.Gain(0.0005)).connect(delay);
+
+function playSound(frequency) {
+    bellSynth.triggerAttackRelease(frequency, "8n");
+    const harmonics = [2, 3, 4, 5].map(n => frequency * n);
+    harmonics.forEach((harmonic, index) => {
+        harmonicsSynth.triggerAttackRelease(harmonic, "8n", undefined, 0.2 / (index + 1));
+    });
+}
+        
+function createMatrix() {
+    matrixElement.innerHTML = '';
+    for (let row = 0; row < 16; row++) {
+        for (let col = 0; col < 16; col++) {
+            const cell = document.createElement('div');
+            cell.classList.add('cell');
+            cell.dataset.row = row;
+            cell.dataset.col = col;
+            cell.addEventListener('mousedown', handleCellInteraction);
+            cell.addEventListener('mouseover', handleCellInteraction);
+            matrixElement.appendChild(cell);
+        }
+    }
+}
+
+function handleCellInteraction(e) {
+    if (e.type === 'mousedown' || (e.type === 'mouseover' && isMouseDown)) {
+        toggleCell(e.target);
+    }
+}
+
+function toggleCell(cell) {
+    cell.classList.toggle('active');
+    updateCellColor(cell);
+}
+
+function updateCellColor(cell) {
+    if (cell.classList.contains('active')) {
+        cell.style.backgroundColor = 'yellow';
+    } else {
+        cell.style.backgroundColor = cell.classList.contains('current') ? 'lightblue' : 'white';
+    }
+}
+
+document.addEventListener('mousedown', () => isMouseDown = true);
+document.addEventListener('mouseup', () => isMouseDown = false);
+
+document.getElementById('reset').addEventListener('click', () => {
+    stopPlaying();
+    currentColumn = 0;
+    document.querySelectorAll('.cell').forEach(cell => {
+        cell.classList.remove('active', 'current');
+        updateCellColor(cell);
+    });
+    document.getElementById('start').textContent = 'Play audio';
+});
+
+
+document.getElementById('start').addEventListener('click', async () => {
+    await Tone.start();
+
+    if (isPlaying) {
+        stopPlaying();
+       return;
+    } else {
+        startPlaying();
+    }
+});
+
+
+function startPlaying() {
+    Tone.Transport.bpm.value = bpmValue;
+    loop = new Tone.Loop(processColumn, 60 / bpmValue).start(0);
+    Tone.Transport.start();
+    isPlaying = true;
+    document.getElementById('start').textContent = 'Stop audio';
+}
+
+function stopPlaying() {
+    if(loop) {
+        loop.cancel(0);
+        loop.dispose();
+        loop = null;
+    }
+
+    Tone.Transport.stop();
+    Tone.Transport.cancel(0);
+    isPlaying = false;
+    document.getElementById('start').textContent = 'Play audio';
+    currentColumn = 0;
+    document.querySelectorAll('.cell').forEach(cell => {
+        cell.classList.remove('current');
+        updateCellColor(cell);
+    });
+}
+
+function processColumn() {
+    if (currentColumn >= 16) {
+        currentColumn = 0;
+    }
+
+    const activeCells = document.querySelectorAll(`.cell.active[data-col="${currentColumn}"]`);
+
+    activeCells.forEach(cell => {
+        const row = parseInt(cell.dataset.row);
+        const frequency = noteFrequencies[row];
+        playSound(frequency);
+    });
+
+    const prevColumn = (currentColumn - 1 + 16) % 16;
+    document.querySelectorAll(`.cell[data-col="${prevColumn}"]`).forEach(cell => {
+        cell.classList.remove('current');
+        updateCellColor(cell);
+    });
+
+    document.querySelectorAll(`.cell[data-col="${currentColumn}"]`).forEach(cell => {
+        cell.classList.add('current');
+        updateCellColor(cell);
+    });
+
+    currentColumn++;
+
+}
+
+applySettingsButton.addEventListener('click', updateBPM);
+
+function updateBPM() {
+    const newBPM = parseInt(bpmInput.value);
+    if (!isNaN(newBPM) && newBPM > 0) {
+        bpmValue = newBPM;
+        intervalTime = (60 / bpmValue) * 1000;
+        if (isPlaying) {
+            stopPlaying();
+            startPlaying();
+        }
+    }
+}
+
+createMatrix();
+    </script>
+</body>
+</html> 
